@@ -30,3 +30,17 @@ jobs:
           go-version-file: go.mod
       - name: test (race, with integration tests)
         run: go test -race -count=1 ./...
+
+  crash-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: start Postgres
+        run: docker compose up -d --wait postgres
+      - name: build
+        run: go build -o bin/durable-tasks ./cmd/durable-tasks
+      - name: crash test (SIGKILL + SIGSTOP workers, then verify every copy)
+        run: ./bin/durable-tasks nemesis --tasks 30 --duration 45s | tee -a "$GITHUB_STEP_SUMMARY"

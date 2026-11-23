@@ -1,7 +1,7 @@
 GO  ?= go
 DSN ?= postgres://durable:durable@localhost:5432/durable_tasks?sslmode=disable
 
-.PHONY: up down reset psql build migrate test test-short lint fmt
+.PHONY: up down reset psql build migrate test test-short lint fmt crash-test bench
 
 ## up: start Postgres in the background and wait until it is healthy
 up:
@@ -25,6 +25,14 @@ build:
 ## migrate: apply migrations to the compose database
 migrate: build
 	./bin/durable-tasks migrate --dsn '$(DSN)'
+
+## crash-test: start Postgres, build, and run the crash test (about a minute)
+crash-test: up build
+	./bin/durable-tasks nemesis --dsn '$(DSN)'
+
+## bench: measure throughput and per-task overhead
+bench: up build
+	./bin/durable-tasks bench --dsn '$(DSN)'
 
 ## test: all tests, including integration tests (needs Docker), with the race detector
 test:
