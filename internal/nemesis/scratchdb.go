@@ -51,15 +51,16 @@ func scratchDB(ctx context.Context, dsn, prefix string) (string, func(), error) 
 
 // adminDSN returns u without pool_* parameters. pgxpool understands those,
 // but a single pgx connection would send them to the server, which rejects
-// them.
+// them. The other parameters are kept exactly as written, because
+// re-encoding them would turn spaces into "+", which pgx does not decode.
 func adminDSN(u *url.URL) string {
 	c := *u
-	q := c.Query()
-	for k := range q {
-		if strings.HasPrefix(k, "pool_") {
-			q.Del(k)
+	var kept []string
+	for _, part := range strings.Split(c.RawQuery, "&") {
+		if part != "" && !strings.HasPrefix(part, "pool_") {
+			kept = append(kept, part)
 		}
 	}
-	c.RawQuery = q.Encode()
+	c.RawQuery = strings.Join(kept, "&")
 	return c.String()
 }

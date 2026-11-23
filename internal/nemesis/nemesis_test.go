@@ -1,6 +1,7 @@
 package nemesis
 
 import (
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -76,4 +77,31 @@ func TestBench(t *testing.T) {
 	var out strings.Builder
 	_ = WriteBenchReport(&out, rep)
 	t.Log(out.String())
+}
+
+func TestWithPoolSize(t *testing.T) {
+	for _, tc := range []struct {
+		dsn, want string
+		added     bool
+	}{
+		{"postgres://u@h/db", "postgres://u@h/db?pool_max_conns=9", true},
+		{"postgres://u@h/db?sslmode=disable", "postgres://u@h/db?sslmode=disable&pool_max_conns=9", true},
+		{"postgres://u@h/db?pool_max_conns=3", "postgres://u@h/db?pool_max_conns=3", false},
+	} {
+		got, added := withPoolSize(tc.dsn, 9)
+		if got != tc.want || added != tc.added {
+			t.Errorf("withPoolSize(%q) = %q, %v; want %q, %v", tc.dsn, got, added, tc.want, tc.added)
+		}
+	}
+}
+
+func TestAdminDSN_KeepsEncodedOptions(t *testing.T) {
+	u, err := url.Parse("postgres://u@h/db?sslmode=disable&pool_max_conns=9&options=-c%20synchronous_commit%3Doff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "postgres://u@h/db?sslmode=disable&options=-c%20synchronous_commit%3Doff"
+	if got := adminDSN(u); got != want {
+		t.Errorf("adminDSN = %q, want %q", got, want)
+	}
 }

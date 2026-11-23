@@ -57,7 +57,9 @@ func newNemesisCmd(opts *rootOptions) *cobra.Command {
 // newBenchCmd builds `durable-tasks bench`, which measures how many trivial
 // tasks per second the scheduler can execute.
 func newBenchCmd(opts *rootOptions) *cobra.Command {
-	cfg := nemesis.BenchConfig{Tasks: 5000, Workers: 4, Concurrency: 8}
+	// 64 slots plus 8 stalker connections stays under PostgreSQL's default
+	// limit of 100 connections.
+	cfg := nemesis.BenchConfig{Tasks: 10000, Workers: 8, Concurrency: 8}
 	cmd := &cobra.Command{
 		Use:   "bench",
 		Short: "Measure scheduler throughput and per-task overhead with trivial tasks",

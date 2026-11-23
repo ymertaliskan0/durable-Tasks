@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,12 +29,19 @@ type BenchConfig struct {
 type BenchReport struct {
 	Config    BenchConfig
 	Elapsed   time.Duration // from starting the workers until the last task finished
+	PoolSize  int           // database connections the workers shared
 	PerSecond float64       // tasks finished per second
 	P50, P99  time.Duration // per-task overhead: claim to finish, including checkpoint and finish writes
 }
 
 // Bench measures the scheduler's own overhead: how many trivial tasks per
 // second the workers can claim, checkpoint and finish.
+//
+// Unless cfg.DSN sets pool_max_conns, the connection pool gets one
+// connection per task slot plus one per worker for its stalker, so slots
+// never wait for a connection. Each task commits three transactions, and
+// PostgreSQL flushes concurrent commits together, so throughput depends on
+// how many connections can commit at once.
 //
 // Returns the report, or an error if the benchmark could not run.
 func Bench(ctx context.Context, cfg BenchConfig) (BenchReport, error) {
@@ -48,6 +56,13 @@ func Bench(ctx context.Context, cfg BenchConfig) (BenchReport, error) {
 		return rep, err
 	}
 	defer drop()
+
+	rep.PoolSize = cfg.Workers*cfg.Concurrency + cfg.Workers
+	if pooled, ok := withPoolSize(dsn, rep.PoolSize); ok {
+		dsn = pooled
+	} else {
+		rep.PoolSize = 0 // set by the caller's DSN
+	}
 
 	store, err := storage.Open(ctx, dsn)
 	if err != nil {
@@ -107,9 +122,13 @@ func Bench(ctx context.Context, cfg BenchConfig) (BenchReport, error) {
 // WriteBenchReport prints a one-paragraph summary of rep to w.
 func WriteBenchReport(w io.Writer, rep BenchReport) error {
 	c := rep.Config
-	_, err := fmt.Fprintf(w, "durable-tasks benchmark: %d tasks, %d workers x %d slots\n"+
+	pool := "as set in the DSN"
+	if rep.PoolSize > 0 {
+		pool = fmt.Sprintf("%d connections", rep.PoolSize)
+	}
+	_, err := fmt.Fprintf(w, "durable-tasks benchmark: %d tasks, %d workers x %d slots, pool %s\n"+
 		"  %.0f tasks/s (%s total); per-task overhead p50 %s, p99 %s\n",
-		c.Tasks, c.Workers, c.Concurrency, rep.PerSecond, rep.Elapsed.Round(time.Millisecond),
+		c.Tasks, c.Workers, c.Concurrency, pool, rep.PerSecond, rep.Elapsed.Round(time.Millisecond),
 		rep.P50.Round(10*time.Microsecond), rep.P99.Round(10*time.Microsecond))
 	return err
 }
@@ -160,4 +179,19 @@ func percentile(sorted []time.Duration, p float64) time.Duration {
 		return 0
 	}
 	return sorted[int(p*float64(len(sorted)-1))]
+}
+
+// withPoolSize adds pool_max_conns=n to dsn, unless dsn already sets it.
+//
+// Returns the new DSN and true, or dsn unchanged and false if it already
+// had a pool size.
+func withPoolSize(dsn string, n int) (string, bool) {
+	if strings.Contains(dsn, "pool_max_conns=") {
+		return dsn, false
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return fmt.Sprintf("%s%spool_max_conns=%d", dsn, sep, n), true
 }

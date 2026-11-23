@@ -70,9 +70,13 @@ against deliberately broken builds, a disabled recovery loop and an
 off-by-one resume, and it detected both.
 
 **Throughput.** On a laptop (WSL2, PostgreSQL 17 in Docker), the scheduler
-processes about 2,000 tasks per second with 32 concurrent task slots. Each
-task requires three committed transactions (claim, checkpoint and finish),
-so the single PostgreSQL instance is the limiting factor.
+processes about 4,000 to 6,000 trivial tasks per second with 64 concurrent
+task slots, each with its own database connection. Each task commits three
+transactions (claim, checkpoint and finish), and most of the time is spent
+waiting for those commits to be flushed to disk. Throughput grows with the
+number of connections, because PostgreSQL flushes concurrent commits
+together. [docs/design.md](docs/design.md#8-crash-test-nemesis-and-benchmark)
+has the measurements.
 
 Stop the worker with Ctrl-C while the task is running. The worker releases
 the task with its progress saved. When the worker is started again, the

@@ -382,13 +382,52 @@ I checked the harness against deliberately broken builds. With the stalker
 disabled, it reports tasks stuck in `running`. With an off-by-one resume,
 it reports corrupted copies.
 
-`durable-tasks bench` measures scheduler overhead with zero-work tasks:
-claim, checkpoint and finish, three committed transactions per task.
-Throughput peaks at a few dozen concurrent slots, at about 2,000 tasks/s
-on my laptop, and then *drops*. The reasons:
-- every claimer scans the same head of the queue, skipping rows other
-  claimers have locked
-- every commit waits for a WAL flush
+### Benchmark
 
-Adding connections only adds contention. If throughput mattered, the next
-step would be batching claims, claiming *k* tasks per statement.
+`durable-tasks bench` (or `make bench`) measures the scheduler's own
+overhead with tasks that do no work. Each task commits three transactions:
+claim, checkpoint and finish. By default it runs 8 in-process workers with
+8 slots each, and gives the connection pool one connection per slot plus
+one per worker for its stalker.
+
+Measured on a laptop (20 threads, WSL2, PostgreSQL 17 in Docker). Each value
+is the median of three runs of 8,000 tasks:
+
+| Task slots | Default pool (20 connections) | One connection per slot | p50 claim-to-finish |
+|---|---|---|---|
+| 8 | 635 tasks/s | 632 tasks/s | 8.3 ms |
+| 16 | 1,242 | 1,247 | 8.4 ms |
+| 32 | 1,518 | 2,370 | 8.8 ms |
+| 64 | 1,428 | 4,039 | 9.3 ms |
+
+**What limits throughput.** I sampled `pg_stat_activity` every 50 ms during
+the 64-slot runs:
+
+- **Waiting for commits to be flushed to disk.** About 50–65% of
+  connection time was spent waiting for the write-ahead log to be flushed
+  (`LWLock:WALWrite`, `IO:WalSync`). Lock waits took about 15%.
+- **Per-task latency stays flat.** With one connection per slot, latency
+  holds at 8–9 ms while throughput grows almost in proportion to the
+  number of slots. PostgreSQL's group commit lets concurrent transactions
+  share one flush, so more connections means more tasks per flush.
+- **pgxpool's default size.** It defaults to one connection per CPU thread
+  (20 here). With more slots than connections, the extra slots wait for a
+  free connection in the Go process: throughput flattens around 1,500
+  tasks/s and latency rises. This is why `bench` sizes the pool itself.
+
+**With flushing turned off.** I also ran the benchmark with
+`synchronous_commit=off`, which removes the flush wait. Throughput reached
+about 7,000 tasks/s at 32 slots and did not increase at 64. About half of
+the connection time then went to lock waits: `LWLock:BufferContent` and
+`Lock:transactionid`. Every claimer competes for the same pages at the
+head of the queue. That is the next limit after commit latency, and
+claiming several tasks per statement would be the way past it.
+
+**Measurement caveats.**
+
+- Results vary by up to 2× between runs with durable commits, because
+  flush latency on WSL2's virtual disk varies. Runs with flushing turned
+  off varied by about ±5%.
+- Back-to-back runs were often slower than the first one, so I compare
+  medians of repeated runs rather than single runs.
+- The benchmark and PostgreSQL share the same 20 threads.
