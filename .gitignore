@@ -1,0 +1,9 @@
+# Build output
+/bin/
+*.test
+*.out
+
+# Local tool settings
+.claude/
+.vscode/
+.idea/
