@@ -1,4 +1,4 @@
-module github.com/ymertaliskan0/Durable-Tasks
+module github.com/ymertaliskan0/durable-tasks
 
 go 1.27.4
 

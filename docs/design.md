@@ -1,7 +1,19 @@
 # durable-tasks — design baseline
 
-Status: **draft, pending review** (Milestone 0). This becomes the source for
-the README's design sections in Milestone 6.
+Status: M1 (scaffold) and M2 (storage) done; M3 (worker + CLI) in progress.
+This becomes the source for the README's design sections.
+
+Milestones (revised 2026-11-23 to finish sooner):
+
+1. Scaffold: module, compose, migrations, CLI root. **Done.**
+2. Storage: claim, fenced writes, cancel, reclaim, idempotent submit. **Done.**
+3. Worker: runner loops, heartbeat, retries with backoff, cleanup path,
+   graceful shutdown, stalker loop, and the `worker`/`submit`/`status`/
+   `list`/`cancel` commands with the `sleep` demo task.
+4. Crash harness and numbers: `nemesis` (SIGKILL/SIGSTOP workers while
+   tasks run, then check invariants), Prometheus metrics, `chunkcopy` task,
+   benchmark.
+5. README: Mermaid diagram, NBS mapping, trade-offs, CV bullet.
 
 durable-tasks is modelled on the task framework in Nebius's Network Block
 Store (`cloud/tasks` in ydb-platform/nbs). It is a simplified reimplementation,
@@ -193,9 +205,14 @@ type Config struct {
 }
 
 type Worker struct{ /* store Store; registry; cfg; metrics; log *slog.Logger */ }
-func NewWorker(store Store, reg *Registry, cfg Config, m *metrics.Metrics, log *slog.Logger) *Worker
+func NewWorker(store Store, reg *Registry, cfg Config, log *slog.Logger) (*Worker, error) // metrics added in M4
 func (w *Worker) Run(ctx context.Context) error // blocks; returns after a clean drain
 ```
+
+After each execution the worker builds an `execution` summary (cleanup?,
+error, lost ownership?, shutting down?, retries so far) and a pure function
+`decide` maps it to one outcome: abandon, finish, cancelled, retry, fail or
+release. Keeping the decision pure makes every branch table-testable.
 
 Concurrency shape inside `Worker.Run`: `Concurrency` runner goroutines (each
 loops claim → execute) plus one stalker goroutine, all tracked with

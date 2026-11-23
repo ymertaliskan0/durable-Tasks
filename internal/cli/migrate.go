@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ymertaliskan/durable-tasks/internal/storage"
+	"github.com/ymertaliskan0/durable-tasks/internal/storage"
 )
 
 // newMigrateCmd builds `durable-tasks migrate`, which applies pending

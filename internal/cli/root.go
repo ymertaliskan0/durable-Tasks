@@ -42,7 +42,14 @@ func NewRootCmd() *cobra.Command {
 		envOr("DURABLE_TASKS_DSN", defaultDSN),
 		"PostgreSQL connection string (default from $DURABLE_TASKS_DSN)")
 
-	cmd.AddCommand(newMigrateCmd(opts))
+	cmd.AddCommand(
+		newMigrateCmd(opts),
+		newWorkerCmd(opts),
+		newSubmitCmd(opts),
+		newStatusCmd(opts),
+		newListCmd(opts),
+		newCancelCmd(opts),
+	)
 	return cmd
 }
 

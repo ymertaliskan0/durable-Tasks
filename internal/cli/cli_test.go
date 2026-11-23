@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ymertaliskan/durable-tasks/internal/pgtest"
+	"github.com/ymertaliskan0/durable-tasks/internal/pgtest"
+	"github.com/ymertaliskan0/durable-tasks/internal/storage"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
@@ -73,5 +76,59 @@ func TestMigrateCommand_RejectsArguments(t *testing.T) {
 	}
 	if err := migrate.Args(migrate, []string{"unexpected-arg"}); err == nil {
 		t.Fatal("migrate accepted a positional argument; want an error")
+	}
+}
+
+// run executes the CLI with args and returns its output.
+func run(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(args)
+	err := cmd.ExecuteContext(t.Context())
+	return out.String(), err
+}
+
+func mustRun(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := run(t, args...)
+	if err != nil {
+		t.Fatalf("%v: %v\noutput:\n%s", args, err, out)
+	}
+	return out
+}
+
+func TestTaskCommands(t *testing.T) {
+	dsn := pgtest.NewDB(t)
+	mustRun(t, "migrate", "--dsn", dsn)
+
+	out := mustRun(t, "submit", "sleep", "--dsn", dsn, "--steps", "3", "--idempotency-key", "k1")
+	id, note, _ := strings.Cut(strings.TrimSpace(out), "\t")
+	if note != "created" {
+		t.Fatalf("submit output %q, want <id>\\tcreated", out)
+	}
+	if out := mustRun(t, "submit", "sleep", "--dsn", dsn, "--steps", "3", "--idempotency-key", "k1"); !strings.Contains(out, id+"\talready existed") {
+		t.Errorf("resubmitting the same key printed %q, want the same id, already existed", out)
+	}
+
+	if out := mustRun(t, "status", id, "--dsn", dsn); !strings.Contains(out, "ready_to_run") || !strings.Contains(out, `"steps":3`) {
+		t.Errorf("status output missing status or request:\n%s", out)
+	}
+	if out := mustRun(t, "list", "--dsn", dsn, "--status", "ready_to_run"); !strings.Contains(out, id) {
+		t.Errorf("list output missing the task:\n%s", out)
+	}
+
+	mustRun(t, "cancel", id, "--dsn", dsn)
+	if out := mustRun(t, "status", id, "--dsn", dsn); !strings.Contains(out, "ready_to_cancel") {
+		t.Errorf("status after cancel:\n%s\nwant ready_to_cancel", out)
+	}
+
+	if _, err := run(t, "status", "not-a-uuid", "--dsn", dsn); err == nil {
+		t.Error("status accepted an invalid id")
+	}
+	if _, err := run(t, "status", "00000000-0000-0000-0000-000000000001", "--dsn", dsn); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("status of a missing task: err = %v, want ErrNotFound", err)
 	}
 }

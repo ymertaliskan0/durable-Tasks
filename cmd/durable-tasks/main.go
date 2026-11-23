@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"github.com/ymertaliskan/durable-tasks/internal/cli"
+	"github.com/ymertaliskan0/durable-tasks/internal/cli"
 )
 
 func main() {
